@@ -21,6 +21,7 @@ let camera;
 let renderer;
 let player;
 let ghostSource;
+let ghostClips = [];
 let hazards = [];
 let snacks = [];
 let score = 0;
@@ -35,6 +36,7 @@ bestEl.textContent = best;
 
 initScene();
 loadGhostModel();
+loadGhostAnimation();
 resetIdleScene();
 animationId = requestAnimationFrame(loop);
 
@@ -121,6 +123,22 @@ function loadGhostModel() {
     () => {
       loadingEl.textContent = "Ghost model unavailable; using 3D placeholders.";
       setTimeout(() => loadingEl.classList.add("hidden"), 2600);
+    }
+  );
+}
+
+function loadGhostAnimation() {
+  const loader = new FBXLoader();
+  loader.setPath("assets/ghost/");
+  loader.load(
+    "Ghost_animation.fbx",
+    (animationModel) => {
+      ghostClips = animationModel.animations || [];
+      hazards.forEach((hazard) => startGhostAnimation(hazard));
+    },
+    undefined,
+    () => {
+      console.warn("Ghost animation file could not be loaded.");
     }
   );
 }
@@ -216,6 +234,7 @@ function update(dt) {
       score = Math.max(0, score - 4);
       scoreEl.textContent = score;
       invincible = 1.1;
+      resetHazardPosition(hazard);
     }
   }
 
@@ -234,8 +253,18 @@ function animateObjects(dt) {
   }
 
   for (const hazard of hazards) {
+    if (hazard.mixer) {
+      hazard.mixer.update(dt);
+    }
     hazard.group.position.y = hazard.baseY + Math.sin(t * 2 + hazard.phase) * 0.2;
     hazard.group.rotation.z = Math.sin(t * 2.2 + hazard.phase) * 0.07;
+
+    if (hazard.ghost) {
+      const pulse = 1 + Math.sin(t * 5 + hazard.phase) * 0.055;
+      hazard.ghost.scale.setScalar(pulse);
+      hazard.ghost.rotation.x = Math.sin(t * 4.2 + hazard.phase) * 0.08;
+      hazard.ghost.rotation.y = Math.PI + Math.sin(t * 3.7 + hazard.phase) * 0.24;
+    }
   }
 }
 
@@ -272,6 +301,8 @@ function makeHazard() {
     vz: Math.sin(angle) * speed,
     baseY: group.position.y,
     phase: random(0, Math.PI * 2),
+    mixer: null,
+    ghost: null,
   };
 
   const marker = new THREE.Mesh(
@@ -315,7 +346,32 @@ function swapGhostPlaceholder(hazard) {
   }
   const ghost = ghostSource.clone(true);
   ghost.position.set(0, 0, 0);
+  hazard.ghost = ghost;
   hazard.group.add(ghost);
+  startGhostAnimation(hazard);
+}
+
+function startGhostAnimation(hazard) {
+  if (!hazard.ghost || ghostClips.length === 0) {
+    return;
+  }
+
+  hazard.mixer = new THREE.AnimationMixer(hazard.ghost);
+  const clip = ghostClips[0];
+  const action = hazard.mixer.clipAction(clip);
+  action.reset();
+  action.play();
+  action.time = random(0, Math.max(0.01, clip.duration));
+}
+
+function resetHazardPosition(hazard) {
+  const side = Math.floor(random(0, 4));
+  const offset = random(-ARENA_SIZE + 3, ARENA_SIZE - 3);
+
+  if (side === 0) hazard.group.position.set(-ARENA_SIZE + 1.5, hazard.baseY, offset);
+  if (side === 1) hazard.group.position.set(ARENA_SIZE - 1.5, hazard.baseY, offset);
+  if (side === 2) hazard.group.position.set(offset, hazard.baseY, -ARENA_SIZE + 1.5);
+  if (side === 3) hazard.group.position.set(offset, hazard.baseY, ARENA_SIZE - 1.5);
 }
 
 function normalizeModel(model, targetHeight) {
