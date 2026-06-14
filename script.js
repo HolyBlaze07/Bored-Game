@@ -1,86 +1,196 @@
-const canvas = document.querySelector("#game");
-const ctx = canvas.getContext("2d");
+import * as THREE from "three";
+import { FBXLoader } from "three/addons/loaders/FBXLoader.js";
+
+const gameEl = document.querySelector("#game");
 const scoreEl = document.querySelector("#score");
 const bestEl = document.querySelector("#best");
 const timeEl = document.querySelector("#time");
 const overlay = document.querySelector("#overlay");
+const loadingEl = document.querySelector("#loading");
 const startButton = document.querySelector("#startButton");
 const controlButtons = document.querySelectorAll("[data-dir]");
 
-const WIDTH = canvas.width;
-const HEIGHT = canvas.height;
 const ROUND_SECONDS = 45;
+const ARENA_SIZE = 18;
+const PLAYER_SPEED = 8.2;
 const keys = new Set();
 
+let scene;
+let camera;
+let renderer;
 let player;
-let snacks;
-let hazards;
-let score;
-let best = Number(localStorage.getItem("boredBreakBest") || 0);
-let timeLeft;
-let lastTick;
+let ghostSource;
+let hazards = [];
+let snacks = [];
+let score = 0;
+let best = Number(localStorage.getItem("boredBreakBest3D") || 0);
+let timeLeft = ROUND_SECONDS;
+let lastTick = performance.now();
 let running = false;
 let animationId;
+let invincible = 0;
 
 bestEl.textContent = best;
-drawIdleBoard();
+
+initScene();
+loadGhostModel();
+resetIdleScene();
+animationId = requestAnimationFrame(loop);
+
+function initScene() {
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x111827);
+  scene.fog = new THREE.Fog(0x111827, 16, 34);
+
+  camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
+  camera.position.set(0, 16, 18);
+  camera.lookAt(0, 0, 0);
+
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.shadowMap.enabled = true;
+  gameEl.appendChild(renderer.domElement);
+
+  const hemiLight = new THREE.HemisphereLight(0xdbeafe, 0x1f2937, 2.5);
+  scene.add(hemiLight);
+
+  const keyLight = new THREE.DirectionalLight(0xffffff, 2.2);
+  keyLight.position.set(8, 12, 6);
+  keyLight.castShadow = true;
+  scene.add(keyLight);
+
+  const floor = new THREE.Mesh(
+    new THREE.PlaneGeometry(ARENA_SIZE * 2, ARENA_SIZE * 2, 24, 24),
+    new THREE.MeshStandardMaterial({
+      color: 0x162238,
+      roughness: 0.82,
+      metalness: 0.05,
+    })
+  );
+  floor.rotation.x = -Math.PI / 2;
+  floor.receiveShadow = true;
+  scene.add(floor);
+
+  const grid = new THREE.GridHelper(ARENA_SIZE * 2, 18, 0x60a5fa, 0x243247);
+  grid.position.y = 0.02;
+  scene.add(grid);
+
+  player = new THREE.Mesh(
+    new THREE.SphereGeometry(0.52, 32, 24),
+    new THREE.MeshStandardMaterial({
+      color: 0x60a5fa,
+      emissive: 0x1d4ed8,
+      emissiveIntensity: 0.22,
+      roughness: 0.35,
+    })
+  );
+  player.position.set(0, 0.55, 0);
+  player.castShadow = true;
+  scene.add(player);
+
+  window.addEventListener("resize", resize);
+  resize();
+}
+
+function loadGhostModel() {
+  const loader = new FBXLoader();
+  loader.setPath("assets/ghost/");
+  loader.load(
+    "Ghost.fbx",
+    (model) => {
+      ghostSource = model;
+      ghostSource.rotation.y = Math.PI;
+      ghostSource.traverse((child) => {
+        if (child.isMesh) {
+          child.material = new THREE.MeshStandardMaterial({
+            color: 0xf3d9ff,
+            emissive: 0xa855f7,
+            emissiveIntensity: 0.22,
+            roughness: 0.55,
+          });
+          child.castShadow = true;
+          child.receiveShadow = true;
+        }
+      });
+      normalizeModel(ghostSource, 2.45);
+      loadingEl.classList.add("hidden");
+      hazards.forEach((hazard) => swapGhostPlaceholder(hazard));
+    },
+    undefined,
+    () => {
+      loadingEl.textContent = "Ghost model unavailable; using 3D placeholders.";
+      setTimeout(() => loadingEl.classList.add("hidden"), 2600);
+    }
+  );
+}
 
 function resetGame() {
-  player = {
-    x: WIDTH / 2,
-    y: HEIGHT / 2,
-    radius: 15,
-    speed: 265,
-    invincible: 0,
-  };
-  snacks = Array.from({ length: 7 }, () => makeSnack());
+  clearObjects(hazards);
+  clearObjects(snacks);
   hazards = Array.from({ length: 5 }, () => makeHazard());
+  snacks = Array.from({ length: 7 }, () => makeSnack());
   score = 0;
   timeLeft = ROUND_SECONDS;
-  lastTick = performance.now();
+  invincible = 0;
   running = true;
+  lastTick = performance.now();
+  player.position.set(0, 0.55, 0);
   scoreEl.textContent = score;
   timeEl.textContent = timeLeft;
   overlay.classList.add("hidden");
-  cancelAnimationFrame(animationId);
-  animationId = requestAnimationFrame(loop);
+}
+
+function resetIdleScene() {
+  clearObjects(hazards);
+  clearObjects(snacks);
+  hazards = Array.from({ length: 5 }, () => makeHazard());
+  snacks = Array.from({ length: 7 }, () => makeSnack());
+  player.position.set(0, 0.55, 0);
 }
 
 function loop(now) {
   const dt = Math.min((now - lastTick) / 1000, 0.04);
   lastTick = now;
-
   update(dt);
-  draw();
-
-  if (running) {
-    animationId = requestAnimationFrame(loop);
-  }
+  renderer.render(scene, camera);
+  animationId = requestAnimationFrame(loop);
 }
 
 function update(dt) {
+  animateObjects(dt);
+
+  if (!running) {
+    return;
+  }
+
   timeLeft -= dt;
   timeEl.textContent = Math.max(0, Math.ceil(timeLeft));
+  invincible = Math.max(0, invincible - dt);
 
   const move = getMoveVector();
-  player.x += move.x * player.speed * dt;
-  player.y += move.y * player.speed * dt;
-  player.x = clamp(player.x, player.radius, WIDTH - player.radius);
-  player.y = clamp(player.y, player.radius, HEIGHT - player.radius);
-  player.invincible = Math.max(0, player.invincible - dt);
+  player.position.x = clamp(player.position.x + move.x * PLAYER_SPEED * dt, -ARENA_SIZE + 1, ARENA_SIZE - 1);
+  player.position.z = clamp(player.position.z + move.z * PLAYER_SPEED * dt, -ARENA_SIZE + 1, ARENA_SIZE - 1);
+  player.material.emissiveIntensity = invincible > 0 ? 0.85 : 0.22;
 
   for (const hazard of hazards) {
-    hazard.x += hazard.vx * dt;
-    hazard.y += hazard.vy * dt;
+    hazard.group.position.x += hazard.vx * dt;
+    hazard.group.position.z += hazard.vz * dt;
 
-    if (hazard.x < hazard.radius || hazard.x > WIDTH - hazard.radius) hazard.vx *= -1;
-    if (hazard.y < hazard.radius || hazard.y > HEIGHT - hazard.radius) hazard.vy *= -1;
+    if (Math.abs(hazard.group.position.x) > ARENA_SIZE - 1) hazard.vx *= -1;
+    if (Math.abs(hazard.group.position.z) > ARENA_SIZE - 1) hazard.vz *= -1;
+
+    hazard.group.lookAt(
+      hazard.group.position.x + hazard.vx,
+      hazard.group.position.y,
+      hazard.group.position.z + hazard.vz
+    );
   }
 
   snacks.forEach((snack, index) => {
-    if (distance(player, snack) < player.radius + snack.radius) {
+    if (distance2D(player.position, snack.group.position) < 1.05) {
       score += snack.bonus ? 5 : 1;
       scoreEl.textContent = score;
+      scene.remove(snack.group);
       snacks[index] = makeSnack();
 
       if (score % 8 === 0 && hazards.length < 10) {
@@ -90,10 +200,10 @@ function update(dt) {
   });
 
   for (const hazard of hazards) {
-    if (player.invincible <= 0 && distance(player, hazard) < player.radius + hazard.radius) {
+    if (invincible <= 0 && distance2D(player.position, hazard.group.position) < 1.45) {
       score = Math.max(0, score - 4);
       scoreEl.textContent = score;
-      player.invincible = 1.1;
+      invincible = 1.1;
     }
   }
 
@@ -102,73 +212,107 @@ function update(dt) {
   }
 }
 
-function draw() {
-  ctx.clearRect(0, 0, WIDTH, HEIGHT);
-  drawGrid();
+function animateObjects(dt) {
+  const t = performance.now() * 0.001;
+  player.rotation.y += dt * 2.3;
 
   for (const snack of snacks) {
-    ctx.beginPath();
-    ctx.fillStyle = snack.bonus ? "#facc15" : "#22c55e";
-    ctx.shadowColor = snack.bonus ? "#facc15" : "#22c55e";
-    ctx.shadowBlur = 18;
-    ctx.arc(snack.x, snack.y, snack.radius, 0, Math.PI * 2);
-    ctx.fill();
+    snack.group.rotation.y += dt * 3;
+    snack.group.position.y = snack.baseY + Math.sin(t * 3 + snack.phase) * 0.16;
   }
 
-  ctx.shadowBlur = 0;
   for (const hazard of hazards) {
-    ctx.beginPath();
-    ctx.fillStyle = "#ef4444";
-    ctx.arc(hazard.x, hazard.y, hazard.radius, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = "rgba(255,255,255,0.55)";
-    ctx.lineWidth = 2;
-    ctx.stroke();
-  }
-
-  ctx.beginPath();
-  ctx.fillStyle = player.invincible > 0 ? "#93c5fd" : "#60a5fa";
-  ctx.shadowColor = "#60a5fa";
-  ctx.shadowBlur = 22;
-  ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.shadowBlur = 0;
-}
-
-function drawGrid() {
-  ctx.fillStyle = "#111827";
-  ctx.fillRect(0, 0, WIDTH, HEIGHT);
-  ctx.strokeStyle = "rgba(255,255,255,0.07)";
-  ctx.lineWidth = 1;
-
-  for (let x = 0; x < WIDTH; x += 40) {
-    ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, HEIGHT);
-    ctx.stroke();
-  }
-
-  for (let y = 0; y < HEIGHT; y += 40) {
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(WIDTH, y);
-    ctx.stroke();
+    hazard.group.position.y = hazard.baseY + Math.sin(t * 2 + hazard.phase) * 0.2;
+    hazard.group.rotation.z = Math.sin(t * 2.2 + hazard.phase) * 0.07;
   }
 }
 
-function drawIdleBoard() {
-  player = { x: WIDTH / 2, y: HEIGHT / 2, radius: 15, invincible: 0 };
-  snacks = Array.from({ length: 7 }, () => makeSnack());
-  hazards = Array.from({ length: 5 }, () => makeHazard());
-  draw();
+function makeSnack() {
+  const bonus = Math.random() < 0.18;
+  const group = new THREE.Group();
+  const coin = new THREE.Mesh(
+    new THREE.CylinderGeometry(bonus ? 0.34 : 0.24, bonus ? 0.34 : 0.24, 0.12, 28),
+    new THREE.MeshStandardMaterial({
+      color: bonus ? 0xfacc15 : 0x22c55e,
+      emissive: bonus ? 0xf59e0b : 0x16a34a,
+      emissiveIntensity: 0.7,
+      roughness: 0.28,
+      metalness: 0.25,
+    })
+  );
+  coin.rotation.x = Math.PI / 2;
+  coin.castShadow = true;
+  group.add(coin);
+  group.position.set(random(-ARENA_SIZE + 2, ARENA_SIZE - 2), 0.9, random(-ARENA_SIZE + 2, ARENA_SIZE - 2));
+  scene.add(group);
+  return { group, bonus, baseY: group.position.y, phase: random(0, Math.PI * 2) };
+}
+
+function makeHazard() {
+  const group = new THREE.Group();
+  group.position.set(random(-ARENA_SIZE + 2, ARENA_SIZE - 2), 0.9, random(-ARENA_SIZE + 2, ARENA_SIZE - 2));
+
+  const speed = random(2.1, 3.4);
+  const angle = random(0, Math.PI * 2);
+  const hazard = {
+    group,
+    vx: Math.cos(angle) * speed,
+    vz: Math.sin(angle) * speed,
+    baseY: group.position.y,
+    phase: random(0, Math.PI * 2),
+  };
+
+  if (ghostSource) {
+    swapGhostPlaceholder(hazard);
+  } else {
+    const placeholder = new THREE.Mesh(
+      new THREE.SphereGeometry(0.55, 24, 18),
+      new THREE.MeshStandardMaterial({
+        color: 0xef4444,
+        emissive: 0x991b1b,
+        emissiveIntensity: 0.4,
+      })
+    );
+    placeholder.castShadow = true;
+    group.add(placeholder);
+  }
+
+  scene.add(group);
+  return hazard;
+}
+
+function swapGhostPlaceholder(hazard) {
+  hazard.group.clear();
+  const ghost = ghostSource.clone(true);
+  ghost.position.set(0, 0, 0);
+  hazard.group.add(ghost);
+}
+
+function normalizeModel(model, targetHeight) {
+  const rawBox = new THREE.Box3().setFromObject(model);
+  const rawSize = rawBox.getSize(new THREE.Vector3());
+  const scale = rawSize.y > 0 ? targetHeight / rawSize.y : 1;
+  model.scale.setScalar(scale);
+  model.updateMatrixWorld(true);
+
+  const box = new THREE.Box3().setFromObject(model);
+  const center = box.getCenter(new THREE.Vector3());
+  model.position.x -= center.x;
+  model.position.y -= box.min.y;
+  model.position.z -= center.z;
+}
+
+function clearObjects(items) {
+  for (const item of items) {
+    scene.remove(item.group);
+  }
 }
 
 function endGame() {
   running = false;
-  cancelAnimationFrame(animationId);
   if (score > best) {
     best = score;
-    localStorage.setItem("boredBreakBest", best);
+    localStorage.setItem("boredBreakBest3D", best);
     bestEl.textContent = best;
   }
 
@@ -178,46 +322,32 @@ function endGame() {
   overlay.classList.remove("hidden");
 }
 
-function makeSnack() {
-  return {
-    x: random(24, WIDTH - 24),
-    y: random(24, HEIGHT - 24),
-    radius: Math.random() < 0.18 ? 12 : 8,
-    bonus: Math.random() < 0.18,
-  };
-}
-
-function makeHazard() {
-  const speed = random(85, 150);
-  const angle = random(0, Math.PI * 2);
-  return {
-    x: random(35, WIDTH - 35),
-    y: random(35, HEIGHT - 35),
-    radius: random(12, 18),
-    vx: Math.cos(angle) * speed,
-    vy: Math.sin(angle) * speed,
-  };
-}
-
 function getMoveVector() {
   let x = 0;
-  let y = 0;
+  let z = 0;
 
   if (keys.has("ArrowLeft") || keys.has("a")) x -= 1;
   if (keys.has("ArrowRight") || keys.has("d")) x += 1;
-  if (keys.has("ArrowUp") || keys.has("w")) y -= 1;
-  if (keys.has("ArrowDown") || keys.has("s")) y += 1;
+  if (keys.has("ArrowUp") || keys.has("w")) z -= 1;
+  if (keys.has("ArrowDown") || keys.has("s")) z += 1;
 
-  if (x !== 0 && y !== 0) {
+  if (x !== 0 && z !== 0) {
     x *= Math.SQRT1_2;
-    y *= Math.SQRT1_2;
+    z *= Math.SQRT1_2;
   }
 
-  return { x, y };
+  return { x, z };
 }
 
-function distance(a, b) {
-  return Math.hypot(a.x - b.x, a.y - b.y);
+function distance2D(a, b) {
+  return Math.hypot(a.x - b.x, a.z - b.z);
+}
+
+function resize() {
+  const rect = gameEl.getBoundingClientRect();
+  renderer.setSize(rect.width, rect.height, false);
+  camera.aspect = rect.width / rect.height;
+  camera.updateProjectionMatrix();
 }
 
 function random(min, max) {
@@ -262,3 +392,5 @@ controlButtons.forEach((button) => {
   button.addEventListener("pointerleave", () => pressDirection(direction, false));
   button.addEventListener("pointercancel", () => pressDirection(direction, false));
 });
+
+window.addEventListener("beforeunload", () => cancelAnimationFrame(animationId));

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Bored Break</title>
+  <title>Bored Break 3D</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -24,12 +24,13 @@
     </section>
 
     <section class="board-wrap">
-      <canvas id="game" width="720" height="520" aria-label="Bored Break game board"></canvas>
+      <div id="game" aria-label="Bored Break 3D game board"></div>
       <div id="overlay" class="overlay">
-        <h1>Bored Break</h1>
-        <p>Collect bright dots, dodge the red ones, and stay alive for 45 seconds.</p>
+        <h1>Bored Break 3D</h1>
+        <p>Collect glowing coins, dodge the ghosts, and survive for 45 seconds.</p>
         <button id="startButton" type="button">Start Game</button>
       </div>
+      <div id="loading" class="loading">Loading ghost model...</div>
     </section>
 
     <section class="controls" aria-label="Controls">
@@ -43,6 +44,14 @@
     </section>
   </main>
 
-  <script src="script.js"></script>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.165.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.165.0/examples/jsm/"
+      }
+    }
+  </script>
+  <script type="module" src="script.js"></script>
 </body>
 </html>
