@@ -13,6 +13,7 @@ const controlButtons = document.querySelectorAll("[data-dir]");
 const ROUND_SECONDS = 45;
 const ARENA_SIZE = 18;
 const PLAYER_SPEED = 8.2;
+const GHOST_CHASE_SPEED = 3.6;
 const keys = new Set();
 
 let scene;
@@ -173,11 +174,22 @@ function update(dt) {
   player.material.emissiveIntensity = invincible > 0 ? 0.85 : 0.22;
 
   for (const hazard of hazards) {
+    const toPlayerX = player.position.x - hazard.group.position.x;
+    const toPlayerZ = player.position.z - hazard.group.position.z;
+    const chaseLength = Math.hypot(toPlayerX, toPlayerZ) || 1;
+    const wobble = Math.sin(performance.now() * 0.0018 + hazard.phase) * 0.8;
+    const chaseX = toPlayerX / chaseLength;
+    const chaseZ = toPlayerZ / chaseLength;
+    const sideX = -chaseZ * wobble;
+    const sideZ = chaseX * wobble;
+
+    hazard.vx = chaseX * GHOST_CHASE_SPEED + sideX;
+    hazard.vz = chaseZ * GHOST_CHASE_SPEED + sideZ;
     hazard.group.position.x += hazard.vx * dt;
     hazard.group.position.z += hazard.vz * dt;
 
-    if (Math.abs(hazard.group.position.x) > ARENA_SIZE - 1) hazard.vx *= -1;
-    if (Math.abs(hazard.group.position.z) > ARENA_SIZE - 1) hazard.vz *= -1;
+    hazard.group.position.x = clamp(hazard.group.position.x, -ARENA_SIZE + 1, ARENA_SIZE - 1);
+    hazard.group.position.z = clamp(hazard.group.position.z, -ARENA_SIZE + 1, ARENA_SIZE - 1);
 
     hazard.group.lookAt(
       hazard.group.position.x + hazard.vx,
@@ -262,6 +274,20 @@ function makeHazard() {
     phase: random(0, Math.PI * 2),
   };
 
+  const marker = new THREE.Mesh(
+    new THREE.CircleGeometry(0.78, 28),
+    new THREE.MeshBasicMaterial({
+      color: 0xef4444,
+      transparent: true,
+      opacity: 0.28,
+      depthWrite: false,
+    })
+  );
+  marker.name = "ghost-marker";
+  marker.rotation.x = -Math.PI / 2;
+  marker.position.y = -0.88;
+  group.add(marker);
+
   if (ghostSource) {
     swapGhostPlaceholder(hazard);
   } else {
@@ -282,7 +308,11 @@ function makeHazard() {
 }
 
 function swapGhostPlaceholder(hazard) {
+  const marker = hazard.group.getObjectByName("ghost-marker");
   hazard.group.clear();
+  if (marker) {
+    hazard.group.add(marker);
+  }
   const ghost = ghostSource.clone(true);
   ghost.position.set(0, 0, 0);
   hazard.group.add(ghost);
