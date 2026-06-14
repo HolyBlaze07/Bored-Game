@@ -1,12 +1,48 @@
-<!DOCTYPE html> 
+<!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Bored Game</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bored Break</title>
+  <link rel="stylesheet" href="styles.css">
 </head>
 <body>
+  <main class="game-shell">
+    <section class="hud" aria-label="Game stats">
+      <div>
+        <span class="label">Score</span>
+        <strong id="score">0</strong>
+      </div>
+      <div>
+        <span class="label">Best</span>
+        <strong id="best">0</strong>
+      </div>
+      <div>
+        <span class="label">Time</span>
+        <strong id="time">45</strong>
+      </div>
+    </section>
 
+    <section class="board-wrap">
+      <canvas id="game" width="720" height="520" aria-label="Bored Break game board"></canvas>
+      <div id="overlay" class="overlay">
+        <h1>Bored Break</h1>
+        <p>Collect bright dots, dodge the red ones, and stay alive for 45 seconds.</p>
+        <button id="startButton" type="button">Start Game</button>
+      </div>
+    </section>
+
+    <section class="controls" aria-label="Controls">
+      <button type="button" data-dir="up">Up</button>
+      <div>
+        <button type="button" data-dir="left">Left</button>
+        <button type="button" data-dir="down">Down</button>
+        <button type="button" data-dir="right">Right</button>
+      </div>
+      <p>Use arrow keys, WASD, or the buttons.</p>
+    </section>
+  </main>
+
+  <script src="script.js"></script>
 </body>
-
 </html>
