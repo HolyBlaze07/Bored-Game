@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { FBXLoader } from "three/addons/loaders/FBXLoader.js";
+import * as SkeletonUtils from "three/addons/utils/SkeletonUtils.js";
 
 const gameEl = document.querySelector("#game");
 const scoreEl = document.querySelector("#score");
@@ -13,7 +14,7 @@ const controlButtons = document.querySelectorAll("[data-dir]");
 const ROUND_SECONDS = 45;
 const ARENA_SIZE = 18;
 const PLAYER_SPEED = 8.2;
-const GHOST_CHASE_SPEED = 3.6;
+const GHOST_CHASE_SPEED = 2.35;
 const keys = new Set();
 
 let scene;
@@ -36,7 +37,6 @@ bestEl.textContent = best;
 
 initScene();
 loadGhostModel();
-loadGhostAnimation();
 resetIdleScene();
 animationId = requestAnimationFrame(loop);
 
@@ -99,9 +99,10 @@ function loadGhostModel() {
   const loader = new FBXLoader();
   loader.setPath("assets/ghost/");
   loader.load(
-    "Ghost.fbx",
+    "Ghost_animation.fbx",
     (model) => {
       ghostSource = model;
+      ghostClips = model.animations || [];
       ghostSource.rotation.y = Math.PI;
       ghostSource.traverse((child) => {
         if (child.isMesh) {
@@ -115,7 +116,7 @@ function loadGhostModel() {
           child.receiveShadow = true;
         }
       });
-      normalizeModel(ghostSource, 2.45);
+      normalizeModel(ghostSource, 3.1);
       loadingEl.classList.add("hidden");
       hazards.forEach((hazard) => swapGhostPlaceholder(hazard));
     },
@@ -123,22 +124,6 @@ function loadGhostModel() {
     () => {
       loadingEl.textContent = "Ghost model unavailable; using 3D placeholders.";
       setTimeout(() => loadingEl.classList.add("hidden"), 2600);
-    }
-  );
-}
-
-function loadGhostAnimation() {
-  const loader = new FBXLoader();
-  loader.setPath("assets/ghost/");
-  loader.load(
-    "Ghost_animation.fbx",
-    (animationModel) => {
-      ghostClips = animationModel.animations || [];
-      hazards.forEach((hazard) => startGhostAnimation(hazard));
-    },
-    undefined,
-    () => {
-      console.warn("Ghost animation file could not be loaded.");
     }
   );
 }
@@ -261,7 +246,7 @@ function animateObjects(dt) {
 
     if (hazard.ghost) {
       const pulse = 1 + Math.sin(t * 5 + hazard.phase) * 0.055;
-      hazard.ghost.scale.setScalar(pulse);
+      hazard.ghost.scale.setScalar(hazard.ghostBaseScale * pulse);
       hazard.ghost.rotation.x = Math.sin(t * 4.2 + hazard.phase) * 0.08;
       hazard.ghost.rotation.y = Math.PI + Math.sin(t * 3.7 + hazard.phase) * 0.24;
     }
@@ -303,21 +288,8 @@ function makeHazard() {
     phase: random(0, Math.PI * 2),
     mixer: null,
     ghost: null,
+    ghostBaseScale: 1,
   };
-
-  const marker = new THREE.Mesh(
-    new THREE.CircleGeometry(0.78, 28),
-    new THREE.MeshBasicMaterial({
-      color: 0xef4444,
-      transparent: true,
-      opacity: 0.28,
-      depthWrite: false,
-    })
-  );
-  marker.name = "ghost-marker";
-  marker.rotation.x = -Math.PI / 2;
-  marker.position.y = -0.88;
-  group.add(marker);
 
   if (ghostSource) {
     swapGhostPlaceholder(hazard);
@@ -339,14 +311,11 @@ function makeHazard() {
 }
 
 function swapGhostPlaceholder(hazard) {
-  const marker = hazard.group.getObjectByName("ghost-marker");
   hazard.group.clear();
-  if (marker) {
-    hazard.group.add(marker);
-  }
-  const ghost = ghostSource.clone(true);
+  const ghost = SkeletonUtils.clone(ghostSource);
   ghost.position.set(0, 0, 0);
   hazard.ghost = ghost;
+  hazard.ghostBaseScale = ghost.scale.x || 1;
   hazard.group.add(ghost);
   startGhostAnimation(hazard);
 }
